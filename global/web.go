@@ -18,7 +18,7 @@ func main() {
 		Handler: routes(),
 	}
 
-	logger.Fatal(server.ListenAndServe())
+	server.ListenAndServe()
 }
 
 func routes() *http.ServeMux {
