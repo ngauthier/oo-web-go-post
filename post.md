@@ -1,6 +1,6 @@
-# Object Oriented Web Applications in Go
+# Refactoring Go's Web Server Hello World
 
-The first thing a web developer first does when they try out a new language is to make a Hello World web application. The simple example in Go is pretty straightforward, but it can be hard to grow it to suit the needs of a larger web application. In this post we'll take the canonical hello world go web app example and refactor it twice into a solution that's much easier to work with in the long run.
+The first thing a web developer does when they try out a new language is to make a Hello World web application. The simple example in Go is pretty straightforward, but it can be hard to grow to suit the needs of a larger web application. In this post we'll take the canonical hello world go web app example and refactor it twice into a solution that's much easier to work with in the long run.
 
 # Part 1: Hello World
 
@@ -16,7 +16,9 @@ http.HandleFunc("/bar", func(w http.ResponseWriter, r *http.Request) {
 log.Fatal(http.ListenAndServe(":8080", nil))
 ```
 
-I would call this first way of creating a web application the "functional" way or the "package level" way, because we use package level functions to access a hidden global http server and a hidden global logger instance. We're just using an inline function for our handler. Let's rewrite this example to make something runnable as a `main` package file that responds to `/foo` and logs `request to foo` using go's log package:
+I would call this first way of creating a web application the "functional" way or the "package level" way, because we use package level functions to access a hidden global http server and a hidden global logger instance and we're just using an inline function for our handler.
+
+Let's rewrite this example to make something runnable as a `main` package file that responds to `/foo` and logs `request to foo` using go's log package:
 
 ```go
 package main
@@ -45,13 +47,11 @@ These super simple requirements encapsulate two the two techniques that we're go
 1. Mapping paths to handlers (a.k.a. routing)
 2. Accessing a shared context (our logger)
 
-So let's talk about growth. As we add more routes and handler functions, our main will get really really long. Not only that, it will contain *all the functionality* of our webapp that we don't extract to a library. So it's going to get big! Second, this http server can only exist compiled into a binary that doesn't contain any other http servers with conflicting routes. Since it uses the global `http` package handler functions, it will share the routing namespace with any other http servers.
-
-As far as shared context goes (our logger) we're again accessing it globally. So we have to ability to configure our logger separate from anyone else's logger.
+So let's talk about growth. As we add more routes and handler functions, our `main` will get really really long. Not only that, it will contain *all the functionality* of our application that we don't extract to a library. So it's going to get big! Second, this http server can only exist compiled into a binary that doesn't contain any other http servers with conflicting routes. Since it uses the global `http` package handler functions, it will share the routing namespace with any other http servers. Likewise, our logger will collide with anyone else using the global logger (this is mainly an issue for settings on the logger, like tagging).
 
 # Part 2: Better Routing with our own Globals
 
-Let's address the problems with the previous solution. First, we will extract the logger into our own global so we can control creating the instance. This way it will be global to our package, but not conflict with other users of the package level `log`. Second, we'll make our own `http.Server` instance onto which we'll map paths to handler functions. Again, this will remove any conflicts with other package level servers. Let's check it out:
+Let's address the problems with the previous solution. First, we will extract the logger into our own package level global variable so we can control creating the instance. This way it will be global to our package, but not conflict with other users of the package level `log`. Second, we'll make our own `http.Server` instance onto which we'll map paths to handler functions. Again, this will remove any conflicts with other package level servers. Let's check it out:
 
 ```go
 package main
@@ -90,11 +90,11 @@ func foo(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-OK, so we have a `logger` `var` that we can set in `main` and we can access throughout our package. Now we could make our logger log to a different output stream, maybe to ship our logs off to some other server or just have better control in general. In this case, we're going to tag the logger with `web` and also turn on timestamps. That's a nice improvement!
+OK, so we have a `logger` `var` that we can set in `main` and we can access throughout our package. Now we can tag the logger with `web` and also turn on timestamps. That's a nice improvement!
 
-Next up we have two new functions: `routes` and `foo`. `routes` will give us an `http.ServeMux` that is in charge of mapping paths to functions. So now we have one single place where we handle routing, and it doesn't have any of our implementation. `foo` is an `http.HandlerFunc` compliant function, so it can just focus on doing what it's supposed to do. And it's nice an readable as its own separate function, instead of being inlined.
+Next up we have two new functions: `routes` and `foo`. `routes` will give us an `http.ServeMux` that is in charge of mapping paths to functions. So now we have one single place where we handle routing, and it doesn't have any of our implementation. `foo` is an `http.HandlerFunc` compliant function, so it can just focus on doing what it's supposed to do. And it's nice and readable as its own separate function, instead of being inlined.
 
-That leaves us with our new `main`. Here, we initialize our global logger, and we also define our http server. We can set it's port here and then point the `Handler` to the mux we create with `routes`. then we can call `ListenAndServe()`. All in all, we've split our previous solution into much more distinct components, we have:
+That leaves us with our new `main`. Here, we initialize our global logger, and we also define our http server. We can set it's port here and then point the `Handler` to the mux we create with `routes`. Then we can call `ListenAndServe()`. All in all, we've split our previous solution into much more distinct components, we have:
 
 1. `main` which actually runs the server
 2. `routes` which defines which paths map to which functions
@@ -102,9 +102,9 @@ That leaves us with our new `main`. Here, we initialize our global logger, and w
 
 Let's talk about growth. When we add a new route, we add one line in our `routes`, and we have to create a new handling function. Additionally, we can even have those handling functions come from other packages. So we can chop up our app into sub-applications based on task. Much nicer!
 
-Additionally, we've left the global context for `log` and `http`. That means our app won't get screwed up by any other libraries that try to attach anything to `http` or `log`. We also have better control over our logger and server. Great!
+We've also left the global context for `log` and `http`. That means our app won't get screwed up by any other libraries that try to attach anything to `http` or `log`. We also have better control over our logger and server. Great!
 
-But, we can do even better. The problems we still have here is that this application is still very much a `main` style app, not a package or library. That makes it hard to share and hard to test. It would also be nice to not rely on global variables at all (our `logger`) and encapsulate them within the web server itself.
+But, we can do even better. The problems we still have here is that this application is still very much a `main` style binary, not a package or library. That makes it hard to share and hard to test. It would also be nice to not rely on global variables at all (our `logger`) and encapsulate them within the web server itself.
 
 # Part 3: Object Oriented to the Rescue
 
@@ -147,11 +147,11 @@ func (a *app) foo(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Starting with `main` you can see that all main does is start a web server on a port, and it uses `New()` to get a `http.Handler`. If we wanted to, this could easily be a function inside a package, like `myapp.New()` and we could move all the significant code outside of the `main` package.
+Starting with `main` you can see that all it does is start a web server on a port, and it uses `New()` to get a `http.Handler`. If we wanted to, `New()` could easily be a function inside a package, like `myapp.New()`, and we could move all the significant code outside of the `main` package.
 
-`New()` is a function that returns an `http.Handler`. By sticking to this interface and not some `Application` interface, we will create a much better Go citizen. It will be understood that the object you get back from our library is going to work well with anything that can work with `http.Handler`s. That means we can wrap them with middleware easily and also test them easily, or even embed them in another web application.
+`New()` is a function that returns an `http.Handler`. By sticking to this interface and not some custom `Application` interface, we will create a much better Go citizen. It will be understood that the object you get back from our library is going to work well with anything that can work with `http.Handler`s. That means we can wrap them with middleware easily and also test them easily, or even embed them in another web application. Also, it means we don't have to export our `Application` type (since the polite thing to do is export any types returned by exported functions). This keeps our API leaner and clearer.
 
-`New()` creates our mux like before, but it also creates our log. Note that we could easily add options to `New()` to change how the logging works, or even take th `log` as a nillable option for doing dependency injection.
+So, `New()` creates our mux like before, but it also creates our log. Note that we could easily add options to `New()` to change how the logging works, or even take th `log` as an option for doing dependency injection.
 
 We then go on to create an `app` wrapping the mux and log. Next, we do our routing by mapping `/foo` to `app.foo`. The cool think about this is that our handler will now run on `app`, giving us access to our entire web application context.
 
@@ -159,12 +159,12 @@ Let's look at `app` the struct. Notice that this is an unexported struct. By hav
 
 Next up, we have `app`'s `ServeHTTP`. This is the only method we have to implement to satisfy the `http.Handler` interface. And all we have to do is delegate it right to our mux. What we're saying here is that we want our mux to respond to all web requests and then use our routing definitions to then call the function that handles the route.
 
-Finally, we have our humble `foo` which is almost unchanged. The only difference is that it is call on `app` and when it logs it accesses the `app`'s logger.
+Finally, we have our humble `foo` which is almost unchanged. The only difference is that it is called on `app` and it logs via the `app`'s logger.
 
 So, let's talk about growth! First of all, we can very easily move our app to it's own package. That's great because we can isolate its dependencies and completely protect its unexported methods. When we grow our app, we don't have to change our `main` at all, we simply add more handlers to the mux in `New()` and map them to functions.
 
-Additionally, as our dependencies grow, we have an obvious place to put them: the `app` struct. We could add a third party api client object, a metrics reporter, a database, and whatever else!
+Additionally, as our dependencies grow, we have an obvious place to put them: the `app` struct. We could add a third party api client object, a metrics reporter, a database, and whatever else! It's also clear that these should be initialized in New, and any configuration they need become parameters for `New()`. Most of the time, this becomes an environment variable that `main` reads and sends right to `New()`. It's a great pattern.
 
-When we go to test our app, we can bypass `New()` and construct an `app` directly (since tests are part of the package being tested) and then we can inject fakes for our apps dependencies and make sure they are used properly. We can also test each handling function individually.
+Then, when we go to test our app, we can bypass `New()` and construct an `app` struct directly (since tests are part of the package being tested) and then we can inject fakes for our app's dependencies and make sure they are used properly. We can also test each handling function individually.
 
 The bottom line here is we've created our web app as a package with a concise and usable API. We've encapsulated and protected our dependencies and removed them from the global scope. And last but not least, we've created clear places to add code when more functionality is added. This helps the code stay clean in the future.
